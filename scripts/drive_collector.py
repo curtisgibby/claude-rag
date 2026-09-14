@@ -139,6 +139,10 @@ def _list_meeting_docs(
         "trashed = false",
     ]
     if modified_after:
+        # Drive's ">" on modifiedTime is inclusive: a document whose stamp
+        # equals the bound is still returned. Filtered out below rather than
+        # worked around by nudging the bound, so the query keeps saying what
+        # it means.
         clauses.append(f"modifiedTime > '{modified_after}'")
 
     files: List[Dict] = []
@@ -168,6 +172,19 @@ def _list_meeting_docs(
         page_token = payload.get("nextPageToken")
         if not page_token:
             break
+
+    if modified_after:
+        # Enforce the exclusive bound the query asked for. Without this the
+        # newest document is re-fetched on every run forever: the watermark is
+        # the max modifiedTime of the last pull, so the newest document's stamp
+        # always equals it, and Drive's inclusive ">" hands it back each time.
+        # Observed 2026-09-14 — the watermark had not moved in two runs while
+        # the same document was re-indexed each morning.
+        #
+        # Compared as strings, which is sound for RFC3339 stamps in UTC at
+        # fixed precision, as Drive returns them.
+        files = [f for f in files if (f.get("modifiedTime") or "") > modified_after]
+
     return files[:max_docs]
 
 
